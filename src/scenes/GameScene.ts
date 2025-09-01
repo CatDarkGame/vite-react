@@ -28,9 +28,16 @@ export class GameScene extends Phaser.Scene {
   private readonly GROUND_Y = 600 - 60
   private readonly ATTACK_COOLDOWN = 500 // 0.5 seconds (2x faster)
   private readonly COMBAT_RANGE = 80
+  private readonly PLAYER_X = 240 // 20% from left (1200 * 0.2)
+  private readonly APPROACH_SPEED = 500 // 5x faster approach
+  private readonly COMBAT_SPEED = 200 // 2x current speed in combat
 
   constructor() {
     super({ key: 'GameScene' })
+  }
+
+  preload() {
+    this.load.audio('hitSound', 'Resources/SFX/minecraft-hit-sfx.mp3')
   }
 
   create() {
@@ -60,10 +67,11 @@ export class GameScene extends Phaser.Scene {
 
   private createPlayer() {
     const playerY = this.GROUND_Y - this.GROUND_HEIGHT/2 - 30
-    const sprite = this.add.rectangle(100, playerY, 40, 60, 0x3498db)
+    const sprite = this.add.rectangle(this.PLAYER_X, playerY, 40, 60, 0x3498db)
     this.physics.add.existing(sprite)
     const body = sprite.body as Phaser.Physics.Arcade.Body
     body.setCollideWorldBounds(true)
+    body.setImmovable(true) // Player doesn't move when hit
     
     this.player = {
       sprite,
@@ -96,7 +104,7 @@ export class GameScene extends Phaser.Scene {
     this.enemies.add(sprite)
     
     const body = sprite.body as Phaser.Physics.Arcade.Body
-    body.setVelocityX(-100) // 2x faster movement
+    body.setVelocityX(-this.APPROACH_SPEED) // Start with fast approach speed
     
     const enemyData: Character = {
       sprite,
@@ -148,6 +156,8 @@ export class GameScene extends Phaser.Scene {
 
   private setupEvents() {
     this.physics.add.overlap(this.player.sprite, this.enemies, this.handleCombat, undefined, this)
+    // Make enemies collide with each other (not pass through)
+    this.physics.add.collider(this.enemies, this.enemies)
   }
 
   private handleCombat(_playerSprite: any, enemySprite: any) {
@@ -160,23 +170,39 @@ export class GameScene extends Phaser.Scene {
       enemySprite.x, enemySprite.y
     )
 
-    if (distance <= this.COMBAT_RANGE) {
-      // Player attacks enemy
-      if (currentTime - this.player.lastAttackTime > this.ATTACK_COOLDOWN) {
-        this.attackCharacter(this.player, enemy)
-        this.player.lastAttackTime = currentTime
-      }
+    // Adjust enemy speed based on distance to player
+    const body = enemySprite.body as Phaser.Physics.Arcade.Body
+    if (distance <= this.COMBAT_RANGE * 2) {
+      // In combat zone - slow down and stop to fight
+      body.setVelocityX(-this.COMBAT_SPEED)
+      
+      if (distance <= this.COMBAT_RANGE) {
+        // Close enough to fight - stop moving
+        body.setVelocityX(0)
+        
+        // Player attacks enemy
+        if (currentTime - this.player.lastAttackTime > this.ATTACK_COOLDOWN) {
+          this.attackCharacter(this.player, enemy)
+          this.player.lastAttackTime = currentTime
+        }
 
-      // Enemy attacks player
-      if (currentTime - enemy.lastAttackTime > this.ATTACK_COOLDOWN) {
-        this.attackCharacter(enemy, this.player)
-        enemy.lastAttackTime = currentTime
+        // Enemy attacks player
+        if (currentTime - enemy.lastAttackTime > this.ATTACK_COOLDOWN) {
+          this.attackCharacter(enemy, this.player)
+          enemy.lastAttackTime = currentTime
+        }
       }
+    } else {
+      // Far from player - maintain approach speed
+      body.setVelocityX(-this.APPROACH_SPEED)
     }
   }
 
   private attackCharacter(attacker: Character, target: Character) {
     target.currentHp -= attacker.attack
+    
+    // Play hit sound
+    this.sound.play('hitSound', { volume: 0.3 })
     
     // Hit effects
     this.createHitEffect(target)
@@ -271,12 +297,55 @@ export class GameScene extends Phaser.Scene {
       }
     })
 
-    // Clean up off-screen enemies
-    this.enemies.children.entries.forEach((enemy: any) => {
-      if (enemy.x < -50) {
-        this.enemyData.delete(enemy)
-        enemy.destroy()
+    // Update all enemies - check distance and adjust speed
+    this.enemies.children.entries.forEach((enemySprite: any) => {
+      const enemy = this.enemyData.get(enemySprite)
+      if (!enemy) return
+
+      const distance = Phaser.Math.Distance.Between(
+        this.player.sprite.x, this.player.sprite.y,
+        enemySprite.x, enemySprite.y
+      )
+
+      const body = enemySprite.body as Phaser.Physics.Arcade.Body
+      
+      if (distance <= this.COMBAT_RANGE * 2) {
+        // In combat zone - slow down
+        if (body.velocity.x < -this.COMBAT_SPEED) {
+          body.setVelocityX(-this.COMBAT_SPEED)
+        }
+        
+        if (distance <= this.COMBAT_RANGE) {
+          // Close enough to fight - stop moving
+          body.setVelocityX(0)
+          this.handleDirectCombat(enemy)
+        }
+      } else if (distance > this.COMBAT_RANGE * 2 && body.velocity.x > -this.APPROACH_SPEED) {
+        // Far from player - maintain approach speed
+        body.setVelocityX(-this.APPROACH_SPEED)
+      }
+
+      // Clean up off-screen enemies
+      if (enemySprite.x < -50) {
+        this.enemyData.delete(enemySprite)
+        enemySprite.destroy()
       }
     })
+  }
+
+  private handleDirectCombat(enemy: Character) {
+    const currentTime = this.time.now
+    
+    // Player attacks enemy
+    if (currentTime - this.player.lastAttackTime > this.ATTACK_COOLDOWN) {
+      this.attackCharacter(this.player, enemy)
+      this.player.lastAttackTime = currentTime
+    }
+
+    // Enemy attacks player
+    if (currentTime - enemy.lastAttackTime > this.ATTACK_COOLDOWN) {
+      this.attackCharacter(enemy, this.player)
+      enemy.lastAttackTime = currentTime
+    }
   }
 }
