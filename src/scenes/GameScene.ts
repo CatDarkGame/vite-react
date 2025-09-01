@@ -60,7 +60,7 @@ export class GameScene extends Phaser.Scene {
     })
 
     const upgradeButton = this.add.rectangle(1100, 50, 80, 30, 0x27ae60)
-    const upgradeText = this.add.text(1100, 50, 'Upgrade', {
+    this.add.text(1100, 50, 'Upgrade', {
       fontSize: '14px',
       color: '#ffffff'
     }).setOrigin(0.5)
@@ -79,7 +79,7 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemies, this.attackEnemy, undefined, this)
   }
 
-  private attackEnemy(player: any, enemy: any) {
+  private attackEnemy(_player: any, enemy: any) {
     enemy.destroy()
     this.gold += 10
     this.updateUI()
